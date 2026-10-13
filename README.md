@@ -54,12 +54,19 @@ waiting. Neither call bypasses a failed batch's retry delay.
 the HTTP status and `Retry-After`, or an error if no response arrives. The
 [integration-test worker](crates/clickman-e2e-worker/src/main.rs) contains a
 working reqwest adapter.
+Disable redirects and use a finite request timeout in your adapter. Redirect
+statuses stay queued for retry at the configured endpoint. Flushes and scheduled
+sends also remove expired events while a retry delay is still waiting.
 
 ## Configuration and identity
 
 By default, a batch becomes due after 20 queued events or 30 seconds. The queue
 holds at most 10,000 events and removes events older than 30 days. Adjust these
 limits on `Config` before opening the client.
+Opening validates the endpoint, public source key and positive queue limits
+before creating a database. The endpoint must be an absolute HTTP(S) URL without
+credentials, query or fragment; one batch may contain at most 500 events. Use a
+separate queue file for each endpoint and source key.
 
 Use the server's base URL as `endpoint`: the client appends `/v1/batch`. A server
 mounted at `/analytics` needs `https://example.com/analytics` as its endpoint.

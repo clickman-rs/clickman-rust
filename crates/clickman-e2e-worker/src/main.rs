@@ -78,7 +78,11 @@ async fn main() -> Result<(), Failure> {
 fn start(arguments: Vec<String>) -> Result<ClickMan, Failure> {
     let [endpoint, write_key, store] = <[String; 3]>::try_from(arguments).map_err(usage)?;
     let config = Config::new(endpoint, write_key, store);
-    let clickman = ClickMan::open(config, Network(reqwest::Client::new()))?;
+    let http = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(std::time::Duration::from_secs(30))
+        .build()?;
+    let clickman = ClickMan::open(config, Network(http))?;
     clickman.set_context(context())?;
     clickman.app_launched("e2e", "1")?;
     Ok(clickman)
@@ -158,4 +162,59 @@ fn emit(line: &Value) -> std::io::Result<()> {
     let mut stdout = std::io::stdout().lock();
     writeln!(stdout, "{line}")?;
     stdout.flush()
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::Duration;
+
+    use axum::Router;
+    use axum::http::{StatusCode, header};
+    use axum::routing::any;
+
+    #[tokio::test]
+    async fn reference_transport_retains_redirected_batches_without_following_them() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = format!("http://{}", listener.local_addr().unwrap());
+        let location = format!("{endpoint}/elsewhere");
+        let requests = Arc::new(AtomicUsize::new(0));
+        let observed = requests.clone();
+        let app = Router::new().fallback(any(move || {
+            let location = location.clone();
+            let observed = observed.clone();
+            async move {
+                observed.fetch_add(1, Ordering::SeqCst);
+                (
+                    StatusCode::TEMPORARY_REDIRECT,
+                    [(header::LOCATION, location)],
+                )
+            }
+        }));
+        let server = tokio::spawn(axum::serve(listener, app).into_future());
+        let directory = tempfile::tempdir().unwrap();
+        let client = super::start(vec![
+            endpoint,
+            "test-key".to_owned(),
+            directory
+                .path()
+                .join("queue.sqlite")
+                .to_string_lossy()
+                .into_owned(),
+        ])
+        .unwrap();
+        client.track("event", serde_json::json!({})).unwrap();
+        tokio::time::timeout(Duration::from_secs(5), client.flush())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(requests.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            client.pending().unwrap(),
+            3,
+            "the event and launch stay queued"
+        );
+        server.abort();
+    }
 }

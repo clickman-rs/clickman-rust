@@ -17,6 +17,28 @@ fn posts(harness: &Harness) -> usize {
 }
 
 #[tokio::test]
+async fn mounted_and_encoded_endpoint_paths_are_preserved() {
+    for endpoint in [
+        "https://ingest.test/analytics",
+        "https://ingest.test/analytics///",
+        "https://ingest.test/space%20here",
+    ] {
+        let harness = Harness::with(|config| config.endpoint = endpoint.to_owned(), []);
+        harness.clickman.track("event", json!({})).unwrap();
+        harness.clickman.flush().await.unwrap();
+        let path = if endpoint.contains("%20") {
+            "space%20here"
+        } else {
+            "analytics"
+        };
+        assert_eq!(
+            harness.http.posted()[0].url,
+            format!("https://ingest.test/{path}/v1/batch")
+        );
+    }
+}
+
+#[tokio::test]
 async fn a_batch_is_gzipped_json_posted_to_v1_batch_with_the_write_key() {
     let harness = Harness::with(
         |config| config.endpoint = "https://ingest.test/".to_owned(),
@@ -166,6 +188,19 @@ async fn a_longer_retry_after_wins_over_the_backoff() {
     harness.clickman.track("event", json!({})).unwrap();
     harness.clickman.flush().await.unwrap();
     assert_delay(&harness, Duration::from_secs(30)).await;
+    assert_eq!(harness.clickman.pending().unwrap(), 0);
+}
+
+#[tokio::test]
+async fn expired_events_are_removed_while_retry_after_is_still_waiting() {
+    let harness = Harness::with(|_| {}, [Ok(retry_after(429, "5184000"))]);
+    harness.clickman.track("event", json!({})).unwrap();
+    harness.clickman.flush().await.unwrap();
+    harness
+        .clock
+        .advance(Duration::from_secs(31 * 24 * 60 * 60));
+    harness.clickman.flush().await.unwrap();
+    assert_eq!(posts(&harness), 1, "expiry must not bypass Retry-After");
     assert_eq!(harness.clickman.pending().unwrap(), 0);
 }
 

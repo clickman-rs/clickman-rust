@@ -43,11 +43,12 @@ impl ClickMan {
         clock: Clock,
         random: Random,
     ) -> Result<Self> {
+        let url = config.batch_url()?;
         Ok(Self {
             store: Store::open(&config.path)?,
             context: Mutex::new(context::standard(Map::new())),
             max_queue: config.max_queue,
-            sender: Sender::new(http, config, clock.clone(), random),
+            sender: Sender::new(http, config, url, clock.clone(), random),
             clock,
         })
     }

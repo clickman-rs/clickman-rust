@@ -84,7 +84,7 @@ pub(crate) fn pending(connection: &Connection) -> Result<usize> {
     Ok(connection.query_row("SELECT count(*) FROM events", [], |row| row.get(0))?)
 }
 
-fn purge(transaction: &Transaction, created_before: i64) -> Result<()> {
+pub(crate) fn purge(transaction: &Transaction, created_before: i64) -> Result<()> {
     let purged =
         transaction.execute("DELETE FROM events WHERE created_at < ?1", [created_before])?;
     if purged > 0 {

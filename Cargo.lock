@@ -145,6 +145,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "url",
  "uuid",
 ]
 
@@ -152,10 +153,12 @@ dependencies = [
 name = "clickman-e2e-worker"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clickman",
  "log",
  "reqwest",
  "serde_json",
+ "tempfile",
  "tokio",
 ]
 

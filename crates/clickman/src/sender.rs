@@ -85,10 +85,10 @@ impl Sender {
     pub(crate) fn new(
         http: Box<dyn HttpClient>,
         config: Config,
+        url: String,
         clock: Clock,
         random: Random,
     ) -> Self {
-        let url = format!("{}/v1/batch", config.endpoint.trim_end_matches('/'));
         let state = Mutex::default();
         Self {
             http,
@@ -113,10 +113,17 @@ impl Sender {
     /// Sends the next batch, or nothing while one is in flight, a retry waits or nothing is due.
     async fn send_next(&self, store: &Store, urgency: Urgency) -> Result<Option<Outcome>> {
         let now = (self.clock)();
-        let Some(_flight) = self.reserve(unix_millis(now)) else {
+        let Some((_flight, may_send)) = self.reserve(unix_millis(now)) else {
             return Ok(None);
         };
         let taken = store.write(|transaction| {
+            if !may_send {
+                batch::purge(
+                    transaction,
+                    unix_millis(now).saturating_sub(millis(self.config.max_age)),
+                )?;
+                return Ok(None);
+            }
             batch::take(transaction, &self.config, unix_millis(now), urgency)
         })?;
         let Some(batch) = taken else { return Ok(None) };
@@ -124,14 +131,14 @@ impl Sender {
         self.settle(store, &batch, &answer).map(Some)
     }
 
-    fn reserve(&self, now: i64) -> Option<FlightGuard<'_>> {
+    fn reserve(&self, now: i64) -> Option<(FlightGuard<'_>, bool)> {
         let mut state = self.state.lock();
         match (state.flight, state.backoff) {
             (Flight::InFlight, _) => None,
-            (Flight::Idle, Backoff::Waiting { until, .. }) if now < until => None,
-            (Flight::Idle, _) => {
+            (Flight::Idle, backoff) => {
+                let may_send = !matches!(backoff, Backoff::Waiting { until, .. } if now < until);
                 state.flight = Flight::InFlight;
-                Some(FlightGuard(&self.state))
+                Some((FlightGuard(&self.state), may_send))
             }
         }
     }

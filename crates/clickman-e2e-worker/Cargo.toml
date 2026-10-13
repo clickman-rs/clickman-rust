@@ -18,3 +18,7 @@ tokio = { workspace = true, features = ["io-std", "io-util", "macros", "rt-multi
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+axum = "0.8"
+tempfile = "3"

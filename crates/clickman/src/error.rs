@@ -4,6 +4,8 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("invalid configuration: {0}")]
+    InvalidConfiguration(&'static str),
     #[error("an event name is 1 to 200 characters without control characters")]
     InvalidEvent,
     #[error("an external id is 1 to 256 characters without control characters")]
