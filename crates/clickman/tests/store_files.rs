@@ -25,6 +25,7 @@ async fn reopening_keeps_the_events_and_the_identity() {
     clickman.track("before", json!({})).unwrap();
     drop(clickman);
     let clickman = open(config(&server.endpoint, &dir));
+    clickman.identify_installation().unwrap();
     assert_eq!(clickman.pending().unwrap(), 1);
     clickman.track("after", json!({})).unwrap();
     clickman.flush().await.unwrap();
@@ -34,6 +35,35 @@ async fn reopening_keeps_the_events_and_the_identity() {
             (&event["externalId"], &event["context"]["traits"]),
             (&json!("user_7"), &json!({"plan": "pro"}))
         );
+    }
+}
+
+#[tokio::test]
+async fn the_installation_actor_survives_reopening() {
+    let server = StubServer::start([]).await;
+    let dir = scratch();
+    let clickman = open(config(&server.endpoint, &dir));
+    clickman.track("legacy_anonymous", json!({})).unwrap();
+    clickman.identify_installation().unwrap();
+    clickman.app_launched("1.0", "10").unwrap();
+    drop(clickman);
+
+    let clickman = open(config(&server.endpoint, &dir));
+    clickman.identify_installation().unwrap();
+    clickman.track("activated", json!({})).unwrap();
+    clickman.flush().await.unwrap();
+
+    assert_eq!(
+        server.event_names(),
+        ["legacy_anonymous", "app_installed", "app_opened", "activated"]
+    );
+    let events = server.received()[0].events();
+    assert_eq!(events[0]["externalId"], "*");
+    let actor = events[1]["externalId"].as_str().unwrap();
+    let id = uuid::Uuid::parse_str(actor.strip_prefix("anon:").unwrap()).unwrap();
+    assert_eq!(id.get_version(), Some(uuid::Version::Random));
+    for event in &events[2..] {
+        assert_eq!(event["externalId"], actor);
     }
 }
 
