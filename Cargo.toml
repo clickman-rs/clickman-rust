@@ -20,7 +20,7 @@ serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "2"
 time = { version = "0.3", features = ["formatting", "parsing", "macros", "serde"] }
 tokio = "1.53"
-uuid = { version = "1", features = ["v7", "serde"] }
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -55,7 +55,12 @@ async fn the_installation_actor_survives_reopening() {
 
     assert_eq!(
         server.event_names(),
-        ["legacy_anonymous", "app_installed", "app_opened", "activated"]
+        [
+            "legacy_anonymous",
+            "app_installed",
+            "app_opened",
+            "activated"
+        ]
     );
     let events = server.received()[0].events();
     assert_eq!(events[0]["externalId"], "*");

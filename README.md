@@ -75,6 +75,12 @@ mounted at `/analytics` needs `https://example.com/analytics` as its endpoint.
 traits. Call `reset` after sign-out. The host supplies context through
 `set_context` and records app launches with `app_launched`.
 
+For installation-level analytics, call `identify_installation()` after opening
+the queue and before recording events. If the current actor is `*`, it stores a
+random `anon:<UUID v4>` actor for later events. Reopening the queue or calling it
+again keeps the stored actor, including one already set with `identify`.
+After `reset`, the next call assigns a new installation actor.
+
 ## Develop and test
 
 Run from the repository root:

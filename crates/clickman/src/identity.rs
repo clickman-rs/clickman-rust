@@ -1,5 +1,6 @@
 use rusqlite::{Connection, Transaction};
 use serde_json::{Map, Value};
+use uuid::Uuid;
 
 use crate::error::{Error, Result};
 use crate::event::is_valid_text;
@@ -32,6 +33,14 @@ pub(crate) fn identify(transaction: &Transaction, external_id: &str) -> Result<(
     transaction.execute(
         "UPDATE identity SET external_id = ?1 WHERE id = 1",
         [external_id],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn identify_installation(transaction: &Transaction) -> Result<()> {
+    transaction.execute(
+        "UPDATE identity SET external_id = ?1 WHERE id = 1 AND external_id = '*'",
+        [format!("anon:{}", Uuid::new_v4())],
     )?;
     Ok(())
 }

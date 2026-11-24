@@ -66,6 +66,15 @@ impl ClickMan {
             .write(|transaction| identity::identify(transaction, external_id))
     }
 
+    /// Assigns this queue a random installation actor if its current actor is `*`.
+    ///
+    /// Later events use the stored actor across restarts. Calling this again
+    /// keeps the current actor, including one set by [Self::identify]. After
+    /// [Self::reset], another call assigns a new installation actor.
+    pub fn identify_installation(&self) -> Result<()> {
+        self.store.write(identity::identify_installation)
+    }
+
     /// Makes later events anonymous and forgets the traits.
     pub fn reset(&self) -> Result<()> {
         self.store.write(identity::reset)
