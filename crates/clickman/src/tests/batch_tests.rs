@@ -152,6 +152,7 @@ fn the_payload_carries_sent_at_and_the_bodies_verbatim() {
     let payload = Batch {
         last_seq: 2,
         bodies,
+        kind: batch::Kind::Events,
     }
     .payload("2026-09-30T12:00:00.123Z");
     assert_eq!(

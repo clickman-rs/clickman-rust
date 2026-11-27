@@ -3,7 +3,7 @@ use serde_json::{Map, Value};
 use uuid::Uuid;
 
 use crate::error::{Error, Result};
-use crate::event::is_valid_text;
+use crate::event::{Recorder, is_valid_text};
 
 pub(crate) const MAX_EXTERNAL_ID_CHARS: usize = 256;
 
@@ -26,11 +26,24 @@ pub(crate) fn actor(connection: &Connection) -> Result<Actor> {
     })
 }
 
-pub(crate) fn identify(transaction: &Transaction, external_id: &str) -> Result<()> {
-    if !is_valid_text(external_id, MAX_EXTERNAL_ID_CHARS) {
+/// The prefix of a visitor's `externalId`, as the browser SDK makes them.
+const VISITOR: &str = "anon:";
+const ANONYMOUS: &str = "*";
+
+/// Makes `external_id` the actor of later events. Identifying an account while
+/// the store tracks as a visitor queues the link between them (identity.json).
+pub(crate) fn identify(recorder: &Recorder, external_id: &str) -> Result<()> {
+    if !is_valid_text(external_id, MAX_EXTERNAL_ID_CHARS) || external_id.starts_with(VISITOR) {
         return Err(Error::InvalidExternalId);
     }
-    transaction.execute(
+    let current = actor(recorder.transaction)?.external_id;
+    if current == external_id {
+        return Ok(());
+    }
+    if current.starts_with(VISITOR) && external_id != ANONYMOUS {
+        recorder.link(&current, external_id)?;
+    }
+    recorder.transaction.execute(
         "UPDATE identity SET external_id = ?1 WHERE id = 1",
         [external_id],
     )?;
@@ -40,7 +53,7 @@ pub(crate) fn identify(transaction: &Transaction, external_id: &str) -> Result<(
 pub(crate) fn identify_installation(transaction: &Transaction) -> Result<()> {
     transaction.execute(
         "UPDATE identity SET external_id = ?1 WHERE id = 1 AND external_id = '*'",
-        [format!("anon:{}", Uuid::new_v4())],
+        [format!("{VISITOR}{}", Uuid::new_v4())],
     )?;
     Ok(())
 }

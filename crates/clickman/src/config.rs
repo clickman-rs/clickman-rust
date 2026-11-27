@@ -89,4 +89,9 @@ impl Config {
         url.set_path(&format!("{}/v1/batch", url.path().trim_end_matches('/')));
         Ok(url.to_string())
     }
+
+    /// Where visitor links go: `/v1/identify` beside the batch route.
+    pub(crate) fn identify_url(batch_url: &str) -> String {
+        format!("{}/identify", batch_url.trim_end_matches("/batch"))
+    }
 }

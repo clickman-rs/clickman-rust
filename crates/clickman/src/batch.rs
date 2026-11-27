@@ -1,15 +1,25 @@
 use rusqlite::{Connection, Transaction};
+use serde_json::Value;
 
 use crate::clock::millis;
 use crate::config::Config;
 use crate::error::Result;
 use crate::store::sql_count;
 
-/// The oldest waiting events, taken to send together; `last_seq` is the newest of them.
+/// The oldest waiting rows, taken to send together: a run of track events, or
+/// one visitor link alone (identity.json); `last_seq` is the newest of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Batch {
     pub(crate) last_seq: i64,
     pub(crate) bodies: Vec<String>,
+    pub(crate) kind: Kind,
+}
+
+/// What a take sends: events to `/v1/batch` or a link to `/v1/identify`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Kind {
+    Events,
+    Link,
 }
 
 /// Whether a batch goes only when due, or whenever anything waits.
@@ -28,14 +38,40 @@ impl Batch {
         )
     }
 
+    /// The request body of a link: the stored row without its `type`.
+    pub(crate) fn link_body(&self) -> String {
+        let link: Value = serde_json::from_str(&self.bodies[0]).unwrap_or_default();
+        serde_json::json!({
+            "anonymousId": link["anonymousId"],
+            "externalId": link["externalId"],
+        })
+        .to_string()
+    }
+
     fn cut(mut rows: Vec<(i64, String)>, config: &Config) -> Option<Self> {
-        let bodies = rows.iter().map(|(_, body)| body.as_str());
-        let count = taken(bodies, config.max_batch_events, config.max_batch_bytes);
+        let first_is_link = is_link(&rows.first()?.1);
+        let (kind, count) = if first_is_link {
+            (Kind::Link, 1)
+        } else {
+            let run = rows.iter().take_while(|(_, body)| !is_link(body)).count();
+            let bodies = rows[..run].iter().map(|(_, body)| body.as_str());
+            let count = taken(bodies, config.max_batch_events, config.max_batch_bytes);
+            (Kind::Events, count)
+        };
         rows.truncate(count);
         let last_seq = rows.last()?.0;
         let bodies = rows.into_iter().map(|(_, body)| body).collect();
-        Some(Self { last_seq, bodies })
+        Some(Self {
+            last_seq,
+            bodies,
+            kind,
+        })
     }
+}
+
+/// Whether a stored row is a visitor link rather than a track event.
+pub(crate) fn is_link(body: &str) -> bool {
+    serde_json::from_str::<Value>(body).is_ok_and(|row| row["type"] == "identify")
 }
 
 /// The next batch, or `None` when nothing is due; events older than `max_age`
@@ -77,6 +113,11 @@ pub(crate) fn taken<'a>(
 /// Deletes a delivered or refused batch; events tracked since keep their place.
 pub(crate) fn remove(transaction: &Transaction, batch: &Batch) -> Result<()> {
     transaction.execute("DELETE FROM events WHERE seq <= ?1", [batch.last_seq])?;
+    Ok(())
+}
+
+pub(crate) fn clear(transaction: &Transaction) -> Result<()> {
+    transaction.execute("DELETE FROM events", [])?;
     Ok(())
 }
 

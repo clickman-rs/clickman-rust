@@ -60,17 +60,26 @@ impl ClickMan {
         self.record(|recorder| recorder.record(event, properties))
     }
 
-    /// Makes `external_id` the actor of later events.
-    pub fn identify(&self, external_id: &str) -> Result<()> {
-        self.store
-            .write(|transaction| identity::identify(transaction, external_id))
+    /// Stores an event declared in code (see `clickman_event`) for the current
+    /// actor and returns its `messageId`.
+    pub fn track_event(&self, event: &impl clickman_event::Event) -> Result<Uuid> {
+        self.record(|recorder| recorder.record(event.name(), event.properties()))
     }
 
-    /// Assigns this queue a random installation actor if its current actor is `*`.
+    /// Makes `external_id` the actor of later events. While the queue tracks as
+    /// a visitor (see [Self::identify_installation]), identifying an account
+    /// also queues the link of the visitor to it, sent in order with the events.
+    /// A visitor ID (`anon:…`) is refused.
+    pub fn identify(&self, external_id: &str) -> Result<()> {
+        self.record(|recorder| identity::identify(recorder, external_id))
+    }
+
+    /// Makes a queue whose actor is `*` track as a new visitor `anon:<UUID>`.
     ///
-    /// Later events use the stored actor across restarts. Calling this again
-    /// keeps the current actor, including one set by [Self::identify]. After
-    /// [Self::reset], another call assigns a new installation actor.
+    /// Later events use the stored visitor across restarts, until
+    /// [Self::identify] links it to an account. Calling this again keeps the
+    /// current actor, including one set by [Self::identify]. After
+    /// [Self::reset], another call starts a new visitor.
     pub fn identify_installation(&self) -> Result<()> {
         self.store.write(identity::identify_installation)
     }
@@ -114,6 +123,17 @@ impl ClickMan {
     /// or another call has a batch in flight.
     pub async fn flush(&self) -> Result<()> {
         self.sender.drain(&self.store, Urgency::Forced).await
+    }
+
+    /// The `externalId` of later events: `*`, a visitor `anon:…` or an account.
+    pub fn actor(&self) -> Result<String> {
+        Ok(self.store.read(identity::actor)?.external_id)
+    }
+
+    /// Deletes every waiting event and link unsent, as when the user stops
+    /// sharing analytics. Events tracked later queue as usual.
+    pub fn clear(&self) -> Result<()> {
+        self.store.write(batch::clear)
     }
 
     /// The events on the device, the one in flight included.

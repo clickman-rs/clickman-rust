@@ -9,6 +9,7 @@ authors.workspace = true
 repository.workspace = true
 
 [dependencies]
+clickman-event.workspace = true
 fastrand = "2"
 flate2.workspace = true
 log = "0.4"

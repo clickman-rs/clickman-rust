@@ -18,4 +18,13 @@ impl Outcome {
             _ => Self::Retry,
         }
     }
+
+    /// The outcome of a response to a visitor link: as a batch's, except that
+    /// 422, a visitor already linked to another account, refuses it (identity.json).
+    pub(crate) fn of_link(status: u16) -> Self {
+        match status {
+            422 => Self::Refused,
+            status => Self::of(status),
+        }
+    }
 }

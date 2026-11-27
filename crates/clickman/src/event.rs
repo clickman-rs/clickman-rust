@@ -50,6 +50,17 @@ impl Recorder<'_> {
         }))
     }
 
+    /// Queues a link of the visitor `anonymous_id` to `external_id` after the
+    /// events stored so far (identity.json), then drops the oldest beyond `max_queue`.
+    pub(crate) fn link(&self, anonymous_id: &str, external_id: &str) -> Result<()> {
+        self.insert(&json!({
+            "type": "identify",
+            "anonymousId": anonymous_id,
+            "externalId": external_id,
+        }))?;
+        self.trim()
+    }
+
     fn insert(&self, body: &Value) -> Result<()> {
         let sql = "INSERT INTO events (created_at, body) VALUES (?1, ?2)";
         self.transaction

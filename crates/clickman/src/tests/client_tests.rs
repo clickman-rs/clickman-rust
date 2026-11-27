@@ -93,3 +93,25 @@ fn a_client_and_its_sends_cross_threads() {
     sent(&harness.clickman.flush());
     sent(&harness.clickman.send_due());
 }
+
+#[test]
+fn actor_names_whom_later_events_are_about() {
+    let harness = Harness::new();
+    assert_eq!(harness.clickman.actor().unwrap(), "*");
+    harness.clickman.identify_installation().unwrap();
+    assert!(harness.clickman.actor().unwrap().starts_with("anon:"));
+    harness.clickman.identify("user_42").unwrap();
+    assert_eq!(harness.clickman.actor().unwrap(), "user_42");
+}
+
+#[test]
+fn clear_deletes_what_waits_and_later_events_queue() {
+    let harness = Harness::new();
+    harness.clickman.identify_installation().unwrap();
+    harness.clickman.track("before", json!({})).unwrap();
+    harness.clickman.identify("user_42").unwrap();
+    harness.clickman.clear().unwrap();
+    assert_eq!(harness.clickman.pending().unwrap(), 0);
+    harness.clickman.track("after", json!({})).unwrap();
+    assert_eq!(harness.stored_names(), ["after"]);
+}

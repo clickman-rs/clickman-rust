@@ -141,6 +141,55 @@ Delivery is at-least-once. The server deduplicates on `messageId` for as long
 as it keeps raw events (the `dedup_window`, default 7 days); a duplicate is
 counted in `duplicates` and not stored again.
 
+## Event catalog
+
+A catalog declares what a source tracks: every event with its meaning and every
+property with its meaning, type and whether it is required. Applications declare
+events in code; each SDK derives names, types and descriptions from the
+declaration and exports the catalog as the JSON below (`catalog.json`). The
+events on the wire do not change.
+
+```json
+{
+  "version": 1,
+  "events": [
+    {
+      "name": "export_completed",
+      "description": "Export wrote every file and they are ready to use.",
+      "properties": [
+        { "name": "format", "description": "File format.", "type": "string", "values": ["wav", "flac"], "required": true },
+        { "name": "title", "description": "Title the user gave the export.", "type": "string", "text": true, "required": false }
+      ]
+    }
+  ]
+}
+```
+
+| Field         | Rule                                                                                                                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `version`     | REQUIRED. `1`.                                                                                                                                   |
+| `events`      | REQUIRED. At most 1,000 events with distinct names, in declaration order.                                                                        |
+| `name`        | REQUIRED. Snake case, `^[a-z][a-z0-9_]*$`: 1–200 characters for an event, 1–128 for a property.                                                  |
+| `description` | REQUIRED. 1–1,000 characters on one line, without control characters. An SDK joins the lines of a declaration with single spaces and trims them. |
+| `properties`  | REQUIRED. At most 128 properties with distinct names, in declaration order.                                                                      |
+| `type`        | REQUIRED. `string`, `integer`, `number` or `boolean`.                                                                                            |
+| `values`      | 1–100 distinct values, each 1–1,024 characters without control characters: the only strings the property takes. Only on a `string`.              |
+| `text`        | `true` on a free-text `string`. A `string` has exactly one of `values` and `text`.                                                               |
+| `required`    | REQUIRED. A required property is in every event; an optional one is left out when absent, never sent as `null`.                                  |
+
+Names follow the declaration: `ExportCompleted`, `exportCompleted` and
+`EXPORT_COMPLETED` all become `export_completed`, for events, properties and
+values alike. Free text must be declared because it can carry personal data;
+SDKs refuse an undeclared string. `standard-events.json` declares the events the
+SDKs record themselves, which an application catalog cannot redeclare.
+
+A project admin saves the catalog of each source with the GraphQL mutation
+`saveCatalog(projectId, source, catalog)`; the dashboard lists every declared
+event. The server refuses an invalid catalog with the reasons of
+`catalog.json` and also refuses `catalog_breaks_funnels` when an event that
+some catalog of the project declared before, and none declares after the save,
+is a step of a saved funnel. Events nobody declared stay accepted.
+
 ## Clients
 
 The Swift, Kotlin and Rust clients each implement this section natively. They
@@ -174,6 +223,30 @@ in Unicode scalar values, is not stored (`events.json`). The queue keeps at most
 `identify` sets the `externalId` of later events and `reset` makes them
 anonymous again and forgets the traits. Traits merge key by key, a null value
 removing a trait (`traits.json`).
+
+A launch records `app_installed` when the store remembers no launch,
+`app_updated` when the version or the build differs from the last one, then
+`app_opened` with `from_background: false` (`lifecycle.json`). Leaving the
+foreground records `app_backgrounded` and coming back `app_opened` with
+`from_background: true`.
+
+### Visitors and links
+
+Native clients link a visitor to an account as the browser SDK does
+(`identity.json`). `identifyInstallation` makes a store that tracks as `*`
+track as a new visitor `anon:<UUIDv4>`, kept across launches; on a store that
+already tracks as a visitor or an account it does nothing. `identify` refuses
+visitor IDs. When the store tracks as a visitor, `identify` of an account ID
+queues a link row `{"type": "identify", "anonymousId": …, "externalId": …}`
+in the `events` table, after the visitor's events and before the account's.
+`reset` tracks as `*` again; the host calls `identifyInstallation` after it to
+start a new visitor, so one visitor never links to two accounts.
+
+A take is one link alone or a contiguous run of track rows that stops before a
+link. A link is sent uncompressed to `POST /v1/identify` with the body
+`{"anonymousId": …, "externalId": …}`. Its outcome follows the batch table,
+except that `422` (the visitor already links to another account) refuses it.
+Links count against the queue limit and age out with events.
 
 A launch records `app_installed` when the store remembers no launch,
 `app_updated` when the version or the build differs from the last one, then

@@ -4,7 +4,7 @@ use std::time::Duration;
 use parking_lot::Mutex;
 
 use crate::backoff;
-use crate::batch::{self, Batch, Urgency};
+use crate::batch::{self, Batch, Kind, Urgency};
 use crate::clock::{Clock, millis, rfc3339_millis, unix_millis};
 use crate::config::Config;
 use crate::error::{Error, Result};
@@ -21,6 +21,7 @@ pub(crate) type Random = Arc<dyn Fn() -> f64 + Send + Sync>;
 pub(crate) struct Sender {
     http: Box<dyn HttpClient>,
     url: String,
+    identify_url: String,
     config: Config,
     clock: Clock,
     random: Random,
@@ -90,9 +91,11 @@ impl Sender {
         random: Random,
     ) -> Self {
         let state = Mutex::default();
+        let identify_url = Config::identify_url(&url);
         Self {
             http,
             url,
+            identify_url,
             config,
             clock,
             random,
@@ -143,36 +146,57 @@ impl Sender {
         }
     }
 
+    /// Events go gzipped to `/v1/batch`; a link goes alone and uncompressed to `/v1/identify`.
     async fn post(&self, batch: &Batch, sent_at: &str) -> Result<Answer> {
-        let body = gzip::compress(batch.payload(sent_at).as_bytes()).map_err(Error::Compression)?;
-        match self.http.post(&self.url, self.headers(), body).await {
+        let (url, headers, body) = match batch.kind {
+            Kind::Events => {
+                let payload = batch.payload(sent_at);
+                let body = gzip::compress(payload.as_bytes()).map_err(Error::Compression)?;
+                (&self.url, self.headers(true), body)
+            }
+            Kind::Link => (
+                &self.identify_url,
+                self.headers(false),
+                batch.link_body().into_bytes(),
+            ),
+        };
+        match self.http.post(url, headers, body).await {
             Ok(response) => Ok(Answer::of(response)),
             Err(message) => {
-                log::warn!("ClickMan could not reach {}: {message}", self.url);
+                log::warn!("ClickMan could not reach {url}: {message}");
                 Ok(Answer::NO_RESPONSE)
             }
         }
     }
 
-    fn headers(&self) -> Vec<(String, String)> {
+    fn headers(&self, gzipped: bool) -> Vec<(String, String)> {
         let authorization = format!("Bearer {}", self.config.write_key);
-        vec![
+        let mut headers = vec![
             ("Authorization".to_owned(), authorization),
             ("Content-Type".to_owned(), "application/json".to_owned()),
-            ("Content-Encoding".to_owned(), "gzip".to_owned()),
-        ]
+        ];
+        if gzipped {
+            headers.push(("Content-Encoding".to_owned(), "gzip".to_owned()));
+        }
+        headers
     }
 
     fn settle(&self, store: &Store, batch: &Batch, answer: &Answer) -> Result<Outcome> {
-        let (outcome, status) = (Outcome::of(answer.status), answer.status);
-        let events = batch.bodies.len();
+        let status = answer.status;
+        let (outcome, what) = match batch.kind {
+            Kind::Events => (
+                Outcome::of(status),
+                format!("{} events", batch.bodies.len()),
+            ),
+            Kind::Link => (Outcome::of_link(status), "a visitor link".to_owned()),
+        };
         match outcome {
             Outcome::Delivered => self.leave_queue(store, batch)?,
             Outcome::Refused => {
-                log::warn!("ClickMan dropped {events} events refused with status {status}");
+                log::warn!("ClickMan dropped {what} refused with status {status}");
                 self.leave_queue(store, batch)?;
             }
-            Outcome::Retry => self.back_off(answer, events),
+            Outcome::Retry => self.back_off(answer, &what),
         }
         Ok(outcome)
     }
@@ -184,7 +208,7 @@ impl Sender {
         Ok(())
     }
 
-    fn back_off(&self, answer: &Answer, events: usize) {
+    fn back_off(&self, answer: &Answer, what: &str) {
         let mut state = self.state.lock();
         let failures = match state.backoff {
             Backoff::Clear => 1,
@@ -195,6 +219,6 @@ impl Sender {
         state.backoff = Backoff::Waiting { failures, until };
         drop(state);
         let status = answer.status;
-        log::info!("ClickMan retries {events} events in {delay:?} after status {status}");
+        log::info!("ClickMan retries {what} in {delay:?} after status {status}");
     }
 }

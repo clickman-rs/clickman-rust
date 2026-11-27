@@ -77,9 +77,53 @@ traits. Call `reset` after sign-out. The host supplies context through
 
 For installation-level analytics, call `identify_installation()` after opening
 the queue and before recording events. If the current actor is `*`, it stores a
-random `anon:<UUID v4>` actor for later events. Reopening the queue or calling it
-again keeps the stored actor, including one already set with `identify`.
-After `reset`, the next call assigns a new installation actor.
+random visitor `anon:<UUID v4>` for later events. Reopening the queue or calling
+it again keeps the stored actor, including one already set with `identify`.
+
+While the queue tracks as a visitor, `identify(account)` also queues a link of
+the visitor to the account, as the browser SDK does: the events recorded before
+the sign-in count for the account. The link travels alone to `/v1/identify`,
+in order with the events. `identify` refuses visitor IDs. After `reset`, call
+`identify_installation()` again to start a new visitor for the next account.
+`actor()` names the current actor and `clear()` deletes everything waiting, for
+a user who stops sharing analytics.
+
+## Typed events and their catalog
+
+Declare the events of an application as one enum with `clickman-event` and
+record them with `track_event`. Names, property types and descriptions come
+from the declaration; `Catalog::to_json` gives the catalog that the dashboard
+shows (docs/PROTOCOL.md, "Event catalog").
+
+```rust
+use clickman_event::{Event, Values};
+
+#[derive(Event)]
+enum Studio {
+    /// Export wrote every file and they are ready to use.
+    ExportCompleted {
+        /// File format of the export.
+        format: Format,
+        /// Length of the exported audio in seconds.
+        duration_seconds: Option<f64>,
+    },
+}
+
+#[derive(Values)]
+enum Format {
+    Wav,
+    Flac,
+}
+
+client.track_event(&Studio::ExportCompleted { format: Format::Wav, duration_seconds: None })?;
+let catalog = Studio::catalog().to_json();
+```
+
+A variant or field without a `///` description does not compile, and neither
+does a `String` property unless it is declared `#[clickman(text)]` free text.
+`Option` makes a property optional; it is left out when absent. Integers,
+floats, booleans and `Values` enums map to `integer`, `number`, `boolean` and
+string `values`. `#[clickman(name = "…")]` overrides a derived name.
 
 ## Develop and test
 

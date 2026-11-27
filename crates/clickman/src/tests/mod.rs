@@ -16,3 +16,4 @@ mod launch_tests;
 mod outcome_tests;
 mod sender_tests;
 mod store_tests;
+mod visitor_tests;
